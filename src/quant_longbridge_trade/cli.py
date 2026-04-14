@@ -6,7 +6,8 @@ import sys
 from typing import Any, Optional
 
 from .account import AccountService, AccountSnapshot
-from .config import create_trade_context
+from .config import create_quote_context, create_trade_context
+from .monitor import QuoteMonitor, build_rules
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -15,6 +16,8 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     if args.command == "account":
         return _handle_account(args)
+    if args.command == "monitor":
+        return _handle_monitor(args)
 
     parser.print_help()
     return 1
@@ -36,6 +39,50 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     account.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
 
+    monitor = subparsers.add_parser("monitor", help="监控某个标的行情，触发规则时打印提醒。")
+    monitor.add_argument(
+        "--symbol",
+        default="TQQQ.US",
+        help="要监控的股票/ETF 代码，例如 TQQQ.US。默认：TQQQ.US。",
+    )
+    monitor.add_argument(
+        "--interval-seconds",
+        type=int,
+        default=10,
+        help="轮询间隔，单位秒；每隔多久向 Longbridge 拉一次最新报价。默认：10。",
+    )
+    monitor.add_argument(
+        "--window-seconds",
+        type=int,
+        default=300,
+        help="涨跌幅计算窗口，单位秒；300 表示用最近 5 分钟价格算 window_change。默认：300。",
+    )
+    monitor.add_argument(
+        "--cooldown-seconds",
+        type=int,
+        default=600,
+        help="同一条规则的提醒冷却时间，单位秒；避免价格持续满足条件时刷屏。默认：600。",
+    )
+    monitor.add_argument("--price-above", help="价格上限提醒；最新价大于这个值时触发，例如 55。")
+    monitor.add_argument("--price-below", help="价格下限提醒；最新价小于这个值时触发，例如 48。")
+    monitor.add_argument(
+        "--pct-change-above",
+        help="窗口涨幅提醒；最近 window-seconds 内涨幅大于这个百分比时触发，例如 2 表示上涨超过 2%%。",
+    )
+    monitor.add_argument(
+        "--pct-change-below",
+        help="窗口跌幅提醒；最近 window-seconds 内涨跌幅小于这个百分比时触发，例如 -2 表示下跌超过 2%%。",
+    )
+    monitor.add_argument(
+        "--drawdown-below",
+        help="回撤提醒；当前价相对监控启动后的最高价回撤低于该百分比时触发，例如 -3 表示回撤超过 3%%。",
+    )
+    monitor.add_argument(
+        "--max-ticks",
+        type=int,
+        help="最多轮询次数；测试用，达到次数后自动退出。不传则一直运行。",
+    )
+
     return parser
 
 
@@ -52,6 +99,44 @@ def _handle_account(args: argparse.Namespace) -> int:
         print(json.dumps(snapshot.to_dict(), ensure_ascii=False, indent=2))
     else:
         print(_format_snapshot(snapshot))
+    return 0
+
+
+def _handle_monitor(args: argparse.Namespace) -> int:
+    try:
+        rules = build_rules(
+            price_above=args.price_above,
+            price_below=args.price_below,
+            pct_change_above=args.pct_change_above,
+            pct_change_below=args.pct_change_below,
+            drawdown_below=args.drawdown_below,
+            cooldown_seconds=args.cooldown_seconds,
+        )
+        if not rules:
+            print(
+                "Error: at least one monitor rule is required. "
+                "Use --price-above, --price-below, --pct-change-above, "
+                "--pct-change-below, or --drawdown-below.",
+                file=sys.stderr,
+            )
+            return 2
+
+        ctx = create_quote_context()
+        monitor = QuoteMonitor(
+            quote_context=ctx,
+            symbol=args.symbol,
+            rules=rules,
+            interval_seconds=args.interval_seconds,
+            window_seconds=args.window_seconds,
+        )
+        monitor.run(max_ticks=args.max_ticks)
+    except KeyboardInterrupt:
+        print("\nStopped.")
+        return 130
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
+
     return 0
 
 

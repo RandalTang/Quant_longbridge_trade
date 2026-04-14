@@ -1,6 +1,6 @@
 # Quant Longbridge Trade
 
-一个最小的 Longbridge 量化交易系统骨架，目前实现账号资金与股票持仓查询。
+一个最小的 Longbridge 量化交易系统骨架，目前实现账号资金、股票持仓查询，以及简单行情监控提醒。
 
 ## 安装
 
@@ -22,6 +22,8 @@ export LONGBRIDGE_ACCESS_TOKEN="你的 Access Token"
 ```
 
 可参考 `.env.example`。
+
+程序启动时也会自动读取项目根目录的 `.env` 文件。`.env` 不要提交到 Git。
 
 ## 查询账号资金与持仓
 
@@ -53,6 +55,46 @@ quant-lb account --currency HKD --symbols 700.HK --json
 
 ```bash
 PYTHONPATH=src python -m quant_longbridge_trade account --json
+```
+
+## 监控 TQQQ
+
+第一版监控器使用轮询方式获取实时行情，满足规则时在终端打印提醒。
+
+监控 TQQQ 当前价高于 75：
+
+```bash
+quant-lb monitor --symbol TQQQ.US --price-above 75
+```
+
+监控 5 分钟窗口涨跌幅，涨幅超过 2% 或跌幅低于 -2% 提醒：
+
+```bash
+quant-lb monitor --symbol TQQQ.US --pct-change-above 2 --pct-change-below -2
+```
+
+监控从启动后的高点回撤超过 3%：
+
+```bash
+quant-lb monitor --symbol TQQQ.US --drawdown-below -3
+```
+
+组合多个规则，并设置 10 秒轮询、10 分钟冷却：
+
+```bash
+quant-lb monitor \
+  --symbol TQQQ.US \
+  --interval-seconds 10 \
+  --cooldown-seconds 600 \
+  --price-above 75 \
+  --pct-change-below -2 \
+  --drawdown-below -3
+```
+
+测试时可以限制轮询次数：
+
+```bash
+quant-lb monitor --symbol TQQQ.US --price-above 75 --max-ticks 3
 ```
 
 ## 模块用法
