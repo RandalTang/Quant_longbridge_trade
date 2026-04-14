@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quant-longbridge-trade"
+version = "0.1.0"
+description = "Longbridge account asset and position query helpers for a quant trading system."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "longbridge",
+]
+
+[project.scripts]
+quant-lb = "quant_longbridge_trade.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
