@@ -18,14 +18,15 @@ class EmaCrossSignal:
     previous_fast_ema: Decimal
     previous_slow_ema: Decimal
     reason: str
+    mode: str = "CONFIRMED"
 
     @property
     def has_signal(self) -> bool:
-        return self.signal in {"BUY", "SELL"}
+        return self.signal in {"BUY", "SELL", "BUY_PREVIEW", "SELL_PREVIEW"}
 
     @property
     def dedupe_key(self) -> str:
-        return f"{self.symbol}:{self.trade_date}:EMA:{self.signal}"
+        return f"{self.symbol}:{self.trade_date}:EMA:{self.mode}:{self.signal}"
 
 
 def evaluate_ema_cross(
@@ -33,6 +34,7 @@ def evaluate_ema_cross(
     symbol: str,
     fast: int = 5,
     slow: int = 30,
+    mode: str = "CONFIRMED",
 ) -> EmaCrossSignal:
     if fast <= 0 or slow <= 0:
         raise ValueError("fast and slow must be positive integers")
@@ -52,13 +54,13 @@ def evaluate_ema_cross(
     latest = candles[-1]
 
     if prev_fast <= prev_slow and latest_fast > latest_slow:
-        signal = "BUY"
+        signal = "BUY_PREVIEW" if mode == "PREVIEW" else "BUY"
         reason = f"EMA{fast} 上穿 EMA{slow}"
     elif prev_fast >= prev_slow and latest_fast < latest_slow:
-        signal = "SELL"
+        signal = "SELL_PREVIEW" if mode == "PREVIEW" else "SELL"
         reason = f"EMA{fast} 下穿 EMA{slow}"
     else:
-        signal = "NO_SIGNAL"
+        signal = "NO_PREVIEW_SIGNAL" if mode == "PREVIEW" else "NO_SIGNAL"
         reason = f"EMA{fast}/EMA{slow} 未发生穿越"
 
     return EmaCrossSignal(
@@ -71,6 +73,7 @@ def evaluate_ema_cross(
         previous_fast_ema=prev_fast,
         previous_slow_ema=prev_slow,
         reason=reason,
+        mode=mode,
     )
 
 
@@ -79,14 +82,14 @@ def format_signal_message(
     current_position: Optional[str] = None,
 ) -> str:
     lines = [
-        "TQQQ EMA 策略提醒",
+        "TQQQ EMA 策略预警" if signal.mode == "PREVIEW" else "TQQQ EMA 策略确认",
         "",
         f"标的：{signal.symbol}",
         f"日期：{signal.trade_date}",
         f"信号：{signal.signal}",
         f"原因：{signal.reason}",
         "",
-        f"收盘价：{_fmt_decimal(signal.close)}",
+        f"{'预估收盘价' if signal.mode == 'PREVIEW' else '收盘价'}：{_fmt_decimal(signal.close)}",
         f"EMA 快线：{_fmt_decimal(signal.fast_ema)}",
         f"EMA 慢线：{_fmt_decimal(signal.slow_ema)}",
         f"昨日快线：{_fmt_decimal(signal.previous_fast_ema)}",
@@ -94,10 +97,12 @@ def format_signal_message(
     ]
     if current_position is not None:
         lines.extend(["", f"当前持仓：{current_position}"])
-    if signal.signal == "BUY":
-        lines.extend(["", "建议动作：检查账户后考虑买入。"])
-    elif signal.signal == "SELL":
-        lines.extend(["", "建议动作：检查账户后考虑卖出。"])
+    if signal.mode == "PREVIEW":
+        lines.extend(["", "说明：这是收盘前预警，不是确认信号；最后几分钟可能变化。"])
+    if signal.signal in {"BUY", "BUY_PREVIEW"}:
+        lines.extend(["", "建议动作：关注收盘确认，检查账户后考虑买入。"])
+    elif signal.signal in {"SELL", "SELL_PREVIEW"}:
+        lines.extend(["", "建议动作：关注收盘确认，检查账户后考虑卖出。"])
     else:
         lines.extend(["", "建议动作：无。"])
     return "\n".join(lines)

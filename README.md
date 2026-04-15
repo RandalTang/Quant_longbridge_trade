@@ -107,6 +107,12 @@ quant-lb monitor --symbol TQQQ.US --price-above 75 --max-ticks 3
 quant-lb signal --symbol TQQQ.US --fast 5 --slow 30
 ```
 
+收盘前预警检查：用实时价模拟今日收盘，判断如果现在收盘是否会金叉/死叉。
+
+```bash
+quant-lb signal --symbol TQQQ.US --fast 5 --slow 30 --preview
+```
+
 有买卖信号时发送飞书提醒：
 
 ```bash
@@ -127,15 +133,25 @@ quant-lb signal --symbol TQQQ.US --fast 5 --slow 30 --notify-errors
 
 这类错误包括 Longbridge Access Token 过期/无效、API Key 缺失、行情权限不足、网络异常等。
 
-常驻运行，每天新加坡时间 06:00 检查一次：
+常驻运行，按标准美股时间检查：
+
+- `15:55 America/New_York`：收盘前预警，用实时价模拟今日收盘
+- `16:10 America/New_York`：收盘后确认，用 Longbridge 日线 K 线确认
 
 ```bash
 quant-lb daemon \
   --symbol TQQQ.US \
   --fast 5 \
   --slow 30 \
-  --run-at 06:00 \
-  --timezone Asia/Singapore
+  --preclose-at 15:55 \
+  --confirm-at 16:10 \
+  --market-timezone America/New_York
+```
+
+关闭收盘前预警，只做收盘后确认：
+
+```bash
+quant-lb daemon --disable-preclose-warning
 ```
 
 提醒去重状态保存在 `.data/alert_state.json`。同一天同一个信号默认只推送一次。
@@ -189,7 +205,7 @@ After=network-online.target
 Type=simple
 WorkingDirectory=/opt/quant-longbridge-trade
 EnvironmentFile=/opt/quant-longbridge-trade/.env
-ExecStart=/opt/miniconda/envs/quant-longbridge/bin/quant-lb daemon --symbol TQQQ.US --fast 5 --slow 30 --run-at 06:00 --timezone Asia/Singapore
+ExecStart=/opt/miniconda/envs/quant-longbridge/bin/quant-lb daemon --symbol TQQQ.US --fast 5 --slow 30 --preclose-at 15:55 --confirm-at 16:10 --market-timezone America/New_York
 Restart=always
 RestartSec=10
 

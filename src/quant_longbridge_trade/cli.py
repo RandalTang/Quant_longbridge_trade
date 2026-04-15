@@ -8,7 +8,7 @@ from typing import Any, Optional
 from .account import AccountService, AccountSnapshot
 from .config import create_quote_context, create_trade_context
 from .daemon import DaemonConfig, SignalDaemon
-from .ema_service import check_ema_signal
+from .ema_service import check_ema_preview_signal, check_ema_signal
 from .notifier import FeishuNotifier
 from .monitor import QuoteMonitor, build_rules
 from .state import JsonStateStore
@@ -93,6 +93,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     signal = subparsers.add_parser("signal", help="检查日线 EMA 策略信号，并可发送飞书提醒。")
     _add_ema_signal_arguments(signal)
+    signal.add_argument("--preview", action="store_true", help="用实时价模拟今日收盘，检查收盘前预警信号。")
     signal.add_argument("--notify", action="store_true", help="有买卖信号时发送飞书提醒。")
     signal.add_argument("--notify-no-signal", action="store_true", help="无信号时也发送飞书提醒。")
     signal.add_argument("--notify-errors", action="store_true", help="检查失败时也发送飞书错误提醒。")
@@ -100,8 +101,12 @@ def _build_parser() -> argparse.ArgumentParser:
 
     daemon = subparsers.add_parser("daemon", help="常驻运行日线 EMA 策略检查，适合部署到云服务器。")
     _add_ema_signal_arguments(daemon)
-    daemon.add_argument("--run-at", default="06:00", help="每天检查时间，格式 HH:MM。默认：06:00。")
-    daemon.add_argument("--timezone", default="Asia/Singapore", help="检查时间所属时区。默认：Asia/Singapore。")
+    daemon.add_argument("--run-at", help="兼容旧参数：只设置确认检查时间，格式 HH:MM。")
+    daemon.add_argument("--preclose-at", default="15:55", help="美股收盘前预警时间，格式 HH:MM。默认：15:55。")
+    daemon.add_argument("--confirm-at", default="16:10", help="美股收盘后确认时间，格式 HH:MM。默认：16:10。")
+    daemon.add_argument("--market-timezone", default="America/New_York", help="市场时区。默认：America/New_York。")
+    daemon.add_argument("--timezone", help="兼容旧参数；如果传入，会覆盖 --market-timezone。")
+    daemon.add_argument("--disable-preclose-warning", action="store_true", help="关闭收盘前 5 分钟预警。")
     daemon.add_argument("--poll-seconds", type=int, default=60, help="daemon 醒来检查的间隔秒数。默认：60。")
     daemon.add_argument("--notify-no-signal", action="store_true", help="无信号时也每天发送一次飞书心跳。")
     daemon.add_argument("--no-notify-errors", action="store_true", help="关闭异常飞书提醒。默认开启。")
@@ -180,7 +185,8 @@ def _handle_monitor(args: argparse.Namespace) -> int:
 
 def _handle_signal(args: argparse.Namespace) -> int:
     try:
-        result = check_ema_signal(
+        checker = check_ema_preview_signal if args.preview else check_ema_signal
+        result = checker(
             quote_context=create_quote_context(),
             trade_context=create_trade_context(),
             symbol=args.symbol,
@@ -214,12 +220,17 @@ def _handle_signal(args: argparse.Namespace) -> int:
 
 def _handle_daemon(args: argparse.Namespace) -> int:
     try:
+        timezone = args.timezone or args.market_timezone
+        confirm_at = args.run_at or args.confirm_at
         config = DaemonConfig(
             symbol=args.symbol,
             fast=args.fast,
             slow=args.slow,
-            run_at=args.run_at,
-            timezone=args.timezone,
+            run_at=confirm_at,
+            timezone=timezone,
+            preclose_at=args.preclose_at,
+            confirm_at=confirm_at,
+            enable_preclose_warning=not args.disable_preclose_warning,
             poll_seconds=args.poll_seconds,
             candle_count=args.candle_count,
             adjust_type=args.adjust_type,
