@@ -95,6 +95,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_ema_signal_arguments(signal)
     signal.add_argument("--notify", action="store_true", help="有买卖信号时发送飞书提醒。")
     signal.add_argument("--notify-no-signal", action="store_true", help="无信号时也发送飞书提醒。")
+    signal.add_argument("--notify-errors", action="store_true", help="检查失败时也发送飞书错误提醒。")
     signal.add_argument("--no-dedupe", action="store_true", help="关闭去重；默认同一天同信号只提醒一次。")
 
     daemon = subparsers.add_parser("daemon", help="常驻运行日线 EMA 策略检查，适合部署到云服务器。")
@@ -103,6 +104,8 @@ def _build_parser() -> argparse.ArgumentParser:
     daemon.add_argument("--timezone", default="Asia/Singapore", help="检查时间所属时区。默认：Asia/Singapore。")
     daemon.add_argument("--poll-seconds", type=int, default=60, help="daemon 醒来检查的间隔秒数。默认：60。")
     daemon.add_argument("--notify-no-signal", action="store_true", help="无信号时也每天发送一次飞书心跳。")
+    daemon.add_argument("--no-notify-errors", action="store_true", help="关闭异常飞书提醒。默认开启。")
+    daemon.add_argument("--error-cooldown-seconds", type=int, default=3600, help="相同异常的飞书提醒冷却时间。默认：3600。")
 
     return parser
 
@@ -202,6 +205,8 @@ def _handle_signal(args: argparse.Namespace) -> int:
                 print(f"Feishu notification sent: {key}")
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
+        if args.notify_errors:
+            _send_signal_error_notification(args, exc)
         return 2
 
     return 0
@@ -219,6 +224,8 @@ def _handle_daemon(args: argparse.Namespace) -> int:
             candle_count=args.candle_count,
             adjust_type=args.adjust_type,
             notify_no_signal=args.notify_no_signal,
+            notify_errors=not args.no_notify_errors,
+            error_cooldown_seconds=args.error_cooldown_seconds,
             state_path=args.state_path,
         )
         SignalDaemon(config).run_forever()
@@ -230,6 +237,30 @@ def _handle_daemon(args: argparse.Namespace) -> int:
         return 2
 
     return 0
+
+
+def _send_signal_error_notification(args: argparse.Namespace, exc: Exception) -> None:
+    message = "\n".join(
+        [
+            "Longbridge 策略检查失败",
+            "",
+            f"标的：{args.symbol}",
+            f"策略：EMA{args.fast}/EMA{args.slow}",
+            "",
+            "可能原因：",
+            "- LONGBRIDGE_ACCESS_TOKEN 过期或无效",
+            "- LONGBRIDGE_APP_KEY / LONGBRIDGE_APP_SECRET / LONGBRIDGE_ACCESS_TOKEN 缺失",
+            "- 行情权限不足",
+            "- 网络或 Longbridge OpenAPI 暂时不可用",
+            "",
+            f"错误：{exc}",
+        ]
+    )
+    try:
+        FeishuNotifier.from_env().send_text(message)
+        print("Feishu error notification sent.")
+    except Exception as notify_exc:
+        print(f"Failed to send Feishu error notification: {notify_exc}", file=sys.stderr)
 
 
 def _format_snapshot(snapshot: AccountSnapshot) -> str:

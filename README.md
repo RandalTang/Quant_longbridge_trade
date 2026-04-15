@@ -119,6 +119,14 @@ quant-lb signal --symbol TQQQ.US --fast 5 --slow 30 --notify
 quant-lb signal --symbol TQQQ.US --fast 5 --slow 30 --notify-no-signal --no-dedupe
 ```
 
+检查失败时也推送飞书错误提醒：
+
+```bash
+quant-lb signal --symbol TQQQ.US --fast 5 --slow 30 --notify-errors
+```
+
+这类错误包括 Longbridge Access Token 过期/无效、API Key 缺失、行情权限不足、网络异常等。
+
 常驻运行，每天新加坡时间 06:00 检查一次：
 
 ```bash
@@ -131,6 +139,18 @@ quant-lb daemon \
 ```
 
 提醒去重状态保存在 `.data/alert_state.json`。同一天同一个信号默认只推送一次。
+
+daemon 默认会把检查异常推送到飞书，并对相同错误做 1 小时冷却，避免刷屏。可以调整：
+
+```bash
+quant-lb daemon --error-cooldown-seconds 1800
+```
+
+如果不想推送异常：
+
+```bash
+quant-lb daemon --no-notify-errors
+```
 
 ### 飞书机器人配置
 
