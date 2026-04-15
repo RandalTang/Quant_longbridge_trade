@@ -8,7 +8,12 @@ from typing import Any, Optional
 from .account import AccountService, AccountSnapshot
 from .config import create_quote_context, create_trade_context
 from .daemon import DaemonConfig, SignalDaemon
-from .ema_service import check_ema_preview_signal, check_ema_signal
+from .ema_service import (
+    check_ema_preview_signal,
+    check_ema_signal,
+    check_sqqq_death_cross,
+    format_secondary_signal_status,
+)
 from .notifier import FeishuNotifier
 from .monitor import QuoteMonitor, build_rules
 from .state import JsonStateStore
@@ -94,6 +99,8 @@ def _build_parser() -> argparse.ArgumentParser:
     signal = subparsers.add_parser("signal", help="检查日线 EMA 策略信号，并可发送飞书提醒。")
     _add_ema_signal_arguments(signal)
     signal.add_argument("--preview", action="store_true", help="用实时价模拟今日收盘，检查收盘前预警信号。")
+    signal.add_argument("--watch-sqqq-death-cross", action="store_true", help="额外检查 SQQQ EMA 死叉；如果触发则提醒空仓。")
+    signal.add_argument("--sqqq-symbol", default="SQQQ.US", help="SQQQ 标的代码。默认：SQQQ.US。")
     signal.add_argument("--notify", action="store_true", help="有买卖信号时发送飞书提醒。")
     signal.add_argument("--notify-no-signal", action="store_true", help="无信号时也发送飞书提醒。")
     signal.add_argument("--notify-errors", action="store_true", help="检查失败时也发送飞书错误提醒。")
@@ -107,6 +114,8 @@ def _build_parser() -> argparse.ArgumentParser:
     daemon.add_argument("--market-timezone", default="America/New_York", help="市场时区。默认：America/New_York。")
     daemon.add_argument("--timezone", help="兼容旧参数；如果传入，会覆盖 --market-timezone。")
     daemon.add_argument("--disable-preclose-warning", action="store_true", help="关闭收盘前 5 分钟预警。")
+    daemon.add_argument("--watch-sqqq-death-cross", action="store_true", help="额外检查 SQQQ EMA 死叉；如果触发则提醒空仓。")
+    daemon.add_argument("--sqqq-symbol", default="SQQQ.US", help="SQQQ 标的代码。默认：SQQQ.US。")
     daemon.add_argument("--poll-seconds", type=int, default=60, help="daemon 醒来检查的间隔秒数。默认：60。")
     daemon.add_argument("--notify-no-signal", action="store_true", help="无信号时也每天发送一次飞书心跳。")
     daemon.add_argument("--no-notify-errors", action="store_true", help="关闭异常飞书提醒。默认开启。")
@@ -197,6 +206,30 @@ def _handle_signal(args: argparse.Namespace) -> int:
         )
         print(result.message)
 
+        sqqq_result = None
+        if args.watch_sqqq_death_cross:
+            sqqq_result = check_sqqq_death_cross(
+                quote_context=create_quote_context(),
+                trade_context=create_trade_context(),
+                symbol=args.sqqq_symbol,
+                fast=args.fast,
+                slow=args.slow,
+                candle_count=args.candle_count,
+                adjust_type=args.adjust_type,
+                preview=args.preview,
+            )
+            print("\n" + sqqq_result.message)
+
+        notification_message = result.message
+        if sqqq_result is not None:
+            notification_message = "\n\n".join(
+                [
+                    result.message,
+                    "---",
+                    format_secondary_signal_status(sqqq_result, "SQQQ 补充状态"),
+                ]
+            )
+
         should_notify = args.notify and result.signal.has_signal
         should_notify = should_notify or args.notify_no_signal
         if should_notify:
@@ -205,10 +238,21 @@ def _handle_signal(args: argparse.Namespace) -> int:
             if not args.no_dedupe and state.was_sent(key):
                 print(f"Skip duplicated notification: {key}")
             else:
-                FeishuNotifier.from_env().send_text(result.message)
+                FeishuNotifier.from_env().send_text(notification_message)
                 if not args.no_dedupe:
                     state.mark_sent(key)
                 print(f"Feishu notification sent: {key}")
+        if sqqq_result is not None:
+            if sqqq_result.signal.signal in {"SELL", "SELL_PREVIEW"} and (args.notify or args.notify_no_signal):
+                key = f"{sqqq_result.signal.dedupe_key}:SQQQ_DEATH"
+                state = JsonStateStore(args.state_path)
+                if not args.no_dedupe and state.was_sent(key):
+                    print(f"Skip duplicated SQQQ death notification: {key}")
+                else:
+                    FeishuNotifier.from_env().send_text(sqqq_result.message)
+                    if not args.no_dedupe:
+                        state.mark_sent(key)
+                    print(f"Feishu SQQQ death notification sent: {key}")
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
         if args.notify_errors:
@@ -224,6 +268,7 @@ def _handle_daemon(args: argparse.Namespace) -> int:
         confirm_at = args.run_at or args.confirm_at
         config = DaemonConfig(
             symbol=args.symbol,
+            sqqq_symbol=args.sqqq_symbol,
             fast=args.fast,
             slow=args.slow,
             run_at=confirm_at,
@@ -235,6 +280,7 @@ def _handle_daemon(args: argparse.Namespace) -> int:
             candle_count=args.candle_count,
             adjust_type=args.adjust_type,
             notify_no_signal=args.notify_no_signal,
+            watch_sqqq_death_cross=args.watch_sqqq_death_cross,
             notify_errors=not args.no_notify_errors,
             error_cooldown_seconds=args.error_cooldown_seconds,
             state_path=args.state_path,

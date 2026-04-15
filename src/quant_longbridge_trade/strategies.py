@@ -99,6 +99,7 @@ def format_signal_message(
         lines.extend(["", f"当前持仓：{current_position}"])
     if signal.mode == "PREVIEW":
         lines.extend(["", "说明：这是收盘前预警，不是确认信号；最后几分钟可能变化。"])
+    lines.extend(["", f"当前状态：{_ema_position_text(signal)}"])
     if signal.signal in {"BUY", "BUY_PREVIEW"}:
         lines.extend(["", "建议动作：关注收盘确认，检查账户后考虑买入。"])
     elif signal.signal in {"SELL", "SELL_PREVIEW"}:
@@ -120,3 +121,11 @@ def _ema(values: list[Decimal], span: int) -> list[Decimal]:
 
 def _fmt_decimal(value: Decimal) -> str:
     return f"{value:.4f}"
+
+
+def _ema_position_text(signal: EmaCrossSignal) -> str:
+    if signal.fast_ema > signal.slow_ema:
+        return "EMA 快线在慢线上方，偏多状态"
+    if signal.fast_ema < signal.slow_ema:
+        return "EMA 快线在慢线下方，偏空状态"
+    return "EMA 快线与慢线基本相等，临界状态"

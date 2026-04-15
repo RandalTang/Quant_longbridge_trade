@@ -8,7 +8,12 @@ from time import sleep
 from zoneinfo import ZoneInfo
 
 from .config import create_quote_context, create_trade_context
-from .ema_service import check_ema_preview_signal, check_ema_signal
+from .ema_service import (
+    check_ema_preview_signal,
+    check_ema_signal,
+    check_sqqq_death_cross,
+    format_secondary_signal_status,
+)
 from .notifier import FeishuNotifier
 from .state import JsonStateStore
 
@@ -16,6 +21,7 @@ from .state import JsonStateStore
 @dataclass(frozen=True)
 class DaemonConfig:
     symbol: str = "TQQQ.US"
+    sqqq_symbol: str = "SQQQ.US"
     fast: int = 5
     slow: int = 30
     run_at: str = "16:10"
@@ -27,6 +33,7 @@ class DaemonConfig:
     candle_count: int = 300
     adjust_type: str = "forward"
     notify_no_signal: bool = False
+    watch_sqqq_death_cross: bool = False
     notify_errors: bool = True
     error_cooldown_seconds: int = 3600
     state_path: str = ".data/alert_state.json"
@@ -72,19 +79,58 @@ class SignalDaemon:
         now = datetime.now(ZoneInfo(self._config.timezone)).isoformat(timespec="seconds")
         print(f"[{now}] {stage} {result.signal.symbol} {result.signal.trade_date} {result.signal.signal}: {result.signal.reason}")
 
+        sqqq_result = None
+        if self._config.watch_sqqq_death_cross:
+            sqqq_result = check_sqqq_death_cross(
+                quote_context=quote_context,
+                trade_context=trade_context,
+                symbol=self._config.sqqq_symbol,
+                fast=self._config.fast,
+                slow=self._config.slow,
+                candle_count=self._config.candle_count,
+                adjust_type=self._config.adjust_type,
+                preview=stage == "PREVIEW",
+            )
+            now = datetime.now(ZoneInfo(self._config.timezone)).isoformat(timespec="seconds")
+            print(f"[{now}] {stage} {sqqq_result.signal.symbol} {sqqq_result.signal.trade_date} {sqqq_result.signal.signal}: {sqqq_result.signal.reason}")
+
+        notification_message = result.message
+        if sqqq_result is not None:
+            notification_message = "\n\n".join(
+                [
+                    result.message,
+                    "---",
+                    format_secondary_signal_status(sqqq_result, "SQQQ 补充状态"),
+                ]
+            )
+
         if result.signal.has_signal:
             if self._state.was_sent(result.signal.dedupe_key):
                 print(f"skip duplicated alert: {result.signal.dedupe_key}")
-                return
-            notifier.send_text(result.message)
-            self._state.mark_sent(result.signal.dedupe_key)
-            print(f"sent alert: {result.signal.dedupe_key}")
+            else:
+                notifier.send_text(notification_message)
+                self._state.mark_sent(result.signal.dedupe_key)
+                print(f"sent alert: {result.signal.dedupe_key}")
         elif self._config.notify_no_signal:
             key = f"{result.signal.symbol}:{result.signal.trade_date}:NO_SIGNAL:EMA"
             if not self._state.was_sent(key):
-                notifier.send_text(result.message)
+                notifier.send_text(notification_message)
                 self._state.mark_sent(key)
                 print(f"sent heartbeat: {key}")
+
+        if sqqq_result is not None:
+            self._send_sqqq_death_cross(sqqq_result, notifier)
+
+    def _send_sqqq_death_cross(self, result, notifier: FeishuNotifier) -> None:
+        if result.signal.signal not in {"SELL", "SELL_PREVIEW"}:
+            return
+        key = f"{result.signal.dedupe_key}:SQQQ_DEATH"
+        if self._state.was_sent(key):
+            print(f"skip duplicated SQQQ death alert: {key}")
+            return
+        notifier.send_text(result.message)
+        self._state.mark_sent(key)
+        print(f"sent SQQQ death alert: {key}")
 
     def _due_stages(self) -> list[str]:
         now = datetime.now(ZoneInfo(self._config.timezone))

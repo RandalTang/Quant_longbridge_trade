@@ -113,6 +113,16 @@ quant-lb signal --symbol TQQQ.US --fast 5 --slow 30
 quant-lb signal --symbol TQQQ.US --fast 5 --slow 30 --preview
 ```
 
+额外检查 SQQQ EMA 死叉。如果你手动持有 SQQQ，死叉时会提醒考虑先空仓：
+
+```bash
+quant-lb signal \
+  --symbol TQQQ.US \
+  --fast 5 \
+  --slow 30 \
+  --watch-sqqq-death-cross
+```
+
 有买卖信号时发送飞书提醒：
 
 ```bash
@@ -145,7 +155,8 @@ quant-lb daemon \
   --slow 30 \
   --preclose-at 15:55 \
   --confirm-at 16:10 \
-  --market-timezone America/New_York
+  --market-timezone America/New_York \
+  --watch-sqqq-death-cross
 ```
 
 关闭收盘前预警，只做收盘后确认：
