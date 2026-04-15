@@ -28,6 +28,10 @@ env/
 .coverage
 htmlcov/
 
+# Local runtime state
+.data/
+logs/
+
 # Jupyter
 .ipynb_checkpoints/
 

@@ -97,6 +97,95 @@ quant-lb monitor \
 quant-lb monitor --symbol TQQQ.US --price-above 75 --max-ticks 3
 ```
 
+## EMA 策略信号和飞书提醒
+
+日线 EMA5/EMA30 策略不需要盘中高频轮询。建议每天美股收盘后检查一次，例如新加坡时间 06:00。
+
+单次检查 TQQQ EMA5/EMA30 信号：
+
+```bash
+quant-lb signal --symbol TQQQ.US --fast 5 --slow 30
+```
+
+有买卖信号时发送飞书提醒：
+
+```bash
+quant-lb signal --symbol TQQQ.US --fast 5 --slow 30 --notify
+```
+
+无信号也推送一次，用于测试飞书 webhook：
+
+```bash
+quant-lb signal --symbol TQQQ.US --fast 5 --slow 30 --notify-no-signal --no-dedupe
+```
+
+常驻运行，每天新加坡时间 06:00 检查一次：
+
+```bash
+quant-lb daemon \
+  --symbol TQQQ.US \
+  --fast 5 \
+  --slow 30 \
+  --run-at 06:00 \
+  --timezone Asia/Singapore
+```
+
+提醒去重状态保存在 `.data/alert_state.json`。同一天同一个信号默认只推送一次。
+
+### 飞书机器人配置
+
+1. 在飞书里创建一个群，或者进入你想接收提醒的群。
+2. 打开群设置，找到 `机器人`。
+3. 添加 `自定义机器人`。
+4. 复制机器人 webhook 地址，格式类似：
+
+```text
+https://open.feishu.cn/open-apis/bot/v2/hook/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+```
+
+5. 写入项目 `.env`：
+
+```bash
+FEISHU_WEBHOOK_URL="https://open.feishu.cn/open-apis/bot/v2/hook/你的-webhook"
+```
+
+如果机器人启用了签名校验，也把签名密钥写入 `.env`：
+
+```bash
+FEISHU_WEBHOOK_SECRET="你的签名密钥"
+```
+
+### 云服务器 systemd 示例
+
+在服务器上把项目放到 `/opt/quant-longbridge-trade` 后，可以创建：
+
+```ini
+# /etc/systemd/system/quant-lb.service
+[Unit]
+Description=Quant Longbridge Trade Daemon
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/quant-longbridge-trade
+EnvironmentFile=/opt/quant-longbridge-trade/.env
+ExecStart=/opt/miniconda/envs/quant-longbridge/bin/quant-lb daemon --symbol TQQQ.US --fast 5 --slow 30 --run-at 06:00 --timezone Asia/Singapore
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+启动：
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable quant-lb
+sudo systemctl start quant-lb
+sudo journalctl -u quant-lb -f
+```
+
 ## 模块用法
 
 ```python

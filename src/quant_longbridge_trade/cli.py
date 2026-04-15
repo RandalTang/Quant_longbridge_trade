@@ -7,7 +7,11 @@ from typing import Any, Optional
 
 from .account import AccountService, AccountSnapshot
 from .config import create_quote_context, create_trade_context
+from .daemon import DaemonConfig, SignalDaemon
+from .ema_service import check_ema_signal
+from .notifier import FeishuNotifier
 from .monitor import QuoteMonitor, build_rules
+from .state import JsonStateStore
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -18,6 +22,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         return _handle_account(args)
     if args.command == "monitor":
         return _handle_monitor(args)
+    if args.command == "signal":
+        return _handle_signal(args)
+    if args.command == "daemon":
+        return _handle_daemon(args)
 
     parser.print_help()
     return 1
@@ -83,7 +91,34 @@ def _build_parser() -> argparse.ArgumentParser:
         help="最多轮询次数；测试用，达到次数后自动退出。不传则一直运行。",
     )
 
+    signal = subparsers.add_parser("signal", help="检查日线 EMA 策略信号，并可发送飞书提醒。")
+    _add_ema_signal_arguments(signal)
+    signal.add_argument("--notify", action="store_true", help="有买卖信号时发送飞书提醒。")
+    signal.add_argument("--notify-no-signal", action="store_true", help="无信号时也发送飞书提醒。")
+    signal.add_argument("--no-dedupe", action="store_true", help="关闭去重；默认同一天同信号只提醒一次。")
+
+    daemon = subparsers.add_parser("daemon", help="常驻运行日线 EMA 策略检查，适合部署到云服务器。")
+    _add_ema_signal_arguments(daemon)
+    daemon.add_argument("--run-at", default="06:00", help="每天检查时间，格式 HH:MM。默认：06:00。")
+    daemon.add_argument("--timezone", default="Asia/Singapore", help="检查时间所属时区。默认：Asia/Singapore。")
+    daemon.add_argument("--poll-seconds", type=int, default=60, help="daemon 醒来检查的间隔秒数。默认：60。")
+    daemon.add_argument("--notify-no-signal", action="store_true", help="无信号时也每天发送一次飞书心跳。")
+
     return parser
+
+
+def _add_ema_signal_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--symbol", default="TQQQ.US", help="Longbridge 标的代码。默认：TQQQ.US。")
+    parser.add_argument("--fast", type=int, default=5, help="EMA 快线周期。默认：5。")
+    parser.add_argument("--slow", type=int, default=30, help="EMA 慢线周期。默认：30。")
+    parser.add_argument("--candle-count", type=int, default=300, help="拉取最近多少根日线。默认：300。")
+    parser.add_argument(
+        "--adjust-type",
+        default="forward",
+        choices=["forward", "none"],
+        help="K 线复权方式。forward=前复权，none=不复权。默认：forward。",
+    )
+    parser.add_argument("--state-path", default=".data/alert_state.json", help="提醒去重状态文件路径。")
 
 
 def _handle_account(args: argparse.Namespace) -> int:
@@ -130,6 +165,63 @@ def _handle_monitor(args: argparse.Namespace) -> int:
             window_seconds=args.window_seconds,
         )
         monitor.run(max_ticks=args.max_ticks)
+    except KeyboardInterrupt:
+        print("\nStopped.")
+        return 130
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
+
+    return 0
+
+
+def _handle_signal(args: argparse.Namespace) -> int:
+    try:
+        result = check_ema_signal(
+            quote_context=create_quote_context(),
+            trade_context=create_trade_context(),
+            symbol=args.symbol,
+            fast=args.fast,
+            slow=args.slow,
+            candle_count=args.candle_count,
+            adjust_type=args.adjust_type,
+        )
+        print(result.message)
+
+        should_notify = args.notify and result.signal.has_signal
+        should_notify = should_notify or args.notify_no_signal
+        if should_notify:
+            state = JsonStateStore(args.state_path)
+            key = result.signal.dedupe_key if result.signal.has_signal else f"{result.signal.symbol}:{result.signal.trade_date}:NO_SIGNAL:EMA"
+            if not args.no_dedupe and state.was_sent(key):
+                print(f"Skip duplicated notification: {key}")
+            else:
+                FeishuNotifier.from_env().send_text(result.message)
+                if not args.no_dedupe:
+                    state.mark_sent(key)
+                print(f"Feishu notification sent: {key}")
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
+
+    return 0
+
+
+def _handle_daemon(args: argparse.Namespace) -> int:
+    try:
+        config = DaemonConfig(
+            symbol=args.symbol,
+            fast=args.fast,
+            slow=args.slow,
+            run_at=args.run_at,
+            timezone=args.timezone,
+            poll_seconds=args.poll_seconds,
+            candle_count=args.candle_count,
+            adjust_type=args.adjust_type,
+            notify_no_signal=args.notify_no_signal,
+            state_path=args.state_path,
+        )
+        SignalDaemon(config).run_forever()
     except KeyboardInterrupt:
         print("\nStopped.")
         return 130
