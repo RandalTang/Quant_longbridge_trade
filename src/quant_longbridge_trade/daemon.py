@@ -112,7 +112,7 @@ class SignalDaemon:
                 self._state.mark_sent(result.signal.dedupe_key)
                 print(f"sent alert: {result.signal.dedupe_key}")
         elif self._config.notify_no_signal:
-            key = f"{result.signal.symbol}:{result.signal.trade_date}:NO_SIGNAL:EMA"
+            key = result.signal.dedupe_key
             if not self._state.was_sent(key):
                 notifier.send_text(notification_message)
                 self._state.mark_sent(key)

@@ -234,7 +234,7 @@ def _handle_signal(args: argparse.Namespace) -> int:
         should_notify = should_notify or args.notify_no_signal
         if should_notify:
             state = JsonStateStore(args.state_path)
-            key = result.signal.dedupe_key if result.signal.has_signal else f"{result.signal.symbol}:{result.signal.trade_date}:NO_SIGNAL:EMA"
+            key = result.signal.dedupe_key
             if not args.no_dedupe and state.was_sent(key):
                 print(f"Skip duplicated notification: {key}")
             else:
