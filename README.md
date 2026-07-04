@@ -233,14 +233,31 @@ sudo systemctl start quant-lb
 sudo journalctl -u quant-lb -f
 ```
 
+## 券商抽象层
+
+券商相关代码都放在 `src/quant_longbridge_trade/brokers/` 下：
+
+- `brokers/base.py`：统一的 `Broker` 接口和通用数据模型（`DailyCandle` / `QuoteSnapshot` / `AccountSnapshot`）
+- `brokers/longbridge/`：长桥实现
+- 以后接 IBKR、嘉信时，新建 `brokers/ibkr/`、`brokers/schwab/` 实现同一接口，并在 `brokers/__init__.py` 的 `create_broker` 里注册
+
+策略、监控、daemon 只依赖 `Broker` 接口，不接触任何券商 SDK。
+
+选择券商（目前只有 longbridge）：
+
+- CLI 参数：`quant-lb account --broker longbridge`
+- 环境变量：`BROKER=longbridge`（可写在 `.env`）
+- 都不传时默认 longbridge
+
 ## 模块用法
 
 ```python
-from quant_longbridge_trade import AccountService, create_trade_context
+from quant_longbridge_trade import create_broker
 
-ctx = create_trade_context()
-service = AccountService(ctx)
-snapshot = service.get_account_snapshot(currency="USD", symbols=["AAPL.US"])
-
+broker = create_broker()  # 默认 longbridge，也可以 create_broker("longbridge")
+snapshot = broker.get_account_snapshot(currency="USD", symbols=["AAPL.US"])
 print(snapshot.to_dict())
+
+candles = broker.get_daily_candles("TQQQ.US", count=300)
+quote = broker.get_quote("TQQQ.US")
 ```
