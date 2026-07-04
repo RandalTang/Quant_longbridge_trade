@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Optional
 
-from .historical_data import DailyCandle
+from .brokers.base import DailyCandle
 
 
 @dataclass(frozen=True)

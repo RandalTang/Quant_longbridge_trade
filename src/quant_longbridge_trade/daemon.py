@@ -7,7 +7,7 @@ from datetime import datetime
 from time import sleep
 from zoneinfo import ZoneInfo
 
-from .config import create_quote_context, create_trade_context
+from .brokers import create_broker
 from .ema_service import (
     check_ema_preview_signal,
     check_ema_signal,
@@ -20,6 +20,7 @@ from .state import JsonStateStore
 
 @dataclass(frozen=True)
 class DaemonConfig:
+    broker: str = "longbridge"
     symbol: str = "TQQQ.US"
     sqqq_symbol: str = "SQQQ.US"
     fast: int = 5
@@ -61,14 +62,12 @@ class SignalDaemon:
             sleep(self._config.poll_seconds)
 
     def run_once(self, stage: str = "CONFIRMED") -> None:
-        quote_context = create_quote_context()
-        trade_context = create_trade_context()
+        broker = create_broker(self._config.broker)
         notifier = FeishuNotifier.from_env()
 
         checker = check_ema_preview_signal if stage == "PREVIEW" else check_ema_signal
         result = checker(
-            quote_context=quote_context,
-            trade_context=trade_context,
+            broker=broker,
             symbol=self._config.symbol,
             fast=self._config.fast,
             slow=self._config.slow,
@@ -82,8 +81,7 @@ class SignalDaemon:
         sqqq_result = None
         if self._config.watch_sqqq_death_cross:
             sqqq_result = check_sqqq_death_cross(
-                quote_context=quote_context,
-                trade_context=trade_context,
+                broker=broker,
                 symbol=self._config.sqqq_symbol,
                 fast=self._config.fast,
                 slow=self._config.slow,
@@ -174,18 +172,18 @@ class SignalDaemon:
 
         message = "\n".join(
             [
-                "Longbridge 量化监控异常",
+                "量化监控异常",
                 "",
                 f"时间：{now.isoformat(timespec='seconds')}",
+                f"券商：{self._config.broker}",
                 f"标的：{self._config.symbol}",
                 f"策略：EMA{self._config.fast}/EMA{self._config.slow}",
                 f"阶段：{stage}",
                 "",
                 "可能原因：",
-                "- LONGBRIDGE_ACCESS_TOKEN 过期或无效",
-                "- LONGBRIDGE_APP_KEY / LONGBRIDGE_APP_SECRET / LONGBRIDGE_ACCESS_TOKEN 缺失",
+                "- 券商 API 凭证过期、无效或缺失",
                 "- 行情权限不足",
-                "- 网络或 Longbridge OpenAPI 暂时不可用",
+                "- 网络或券商 OpenAPI 暂时不可用",
                 "",
                 f"错误：{error_text}",
             ]

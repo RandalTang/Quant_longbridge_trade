@@ -4,10 +4,8 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Optional
 
-from .account import AccountService
-from .historical_data import get_daily_candles
+from .brokers import Broker
 from .strategies import EmaCrossSignal, evaluate_ema_cross, format_signal_message
-from .monitor import normalize_quote
 
 
 @dataclass(frozen=True)
@@ -18,42 +16,38 @@ class SignalCheckResult:
 
 
 def check_ema_signal(
-    quote_context,
+    broker: Broker,
     symbol: str = "TQQQ.US",
     fast: int = 5,
     slow: int = 30,
     candle_count: int = 300,
     adjust_type: str = "forward",
-    trade_context=None,
 ) -> SignalCheckResult:
-    candles = get_daily_candles(
-        quote_context=quote_context,
+    candles = broker.get_daily_candles(
         symbol=symbol,
         count=candle_count,
         adjust_type=adjust_type,
     )
     signal = evaluate_ema_cross(candles, symbol=symbol, fast=fast, slow=slow)
-    current_position = _current_position_text(trade_context, symbol) if trade_context else None
+    current_position = _current_position_text(broker, symbol)
     message = format_signal_message(signal, current_position=current_position)
     return SignalCheckResult(signal=signal, message=message, current_position=current_position)
 
 
 def check_ema_preview_signal(
-    quote_context,
+    broker: Broker,
     symbol: str = "TQQQ.US",
     fast: int = 5,
     slow: int = 30,
     candle_count: int = 300,
     adjust_type: str = "forward",
-    trade_context=None,
 ) -> SignalCheckResult:
-    candles = get_daily_candles(
-        quote_context=quote_context,
+    candles = broker.get_daily_candles(
         symbol=symbol,
         count=candle_count,
         adjust_type=adjust_type,
     )
-    latest_quote = normalize_quote(quote_context.quote([symbol])[0])
+    latest_quote = broker.get_quote(symbol)
 
     quote_trade_date = _quote_trade_date(latest_quote.timestamp)
     if candles and candles[-1].timestamp.date().isoformat() == quote_trade_date:
@@ -72,25 +66,23 @@ def check_ema_preview_signal(
         )
 
     signal = evaluate_ema_cross(candles, symbol=symbol, fast=fast, slow=slow, mode="PREVIEW")
-    current_position = _current_position_text(trade_context, symbol) if trade_context else None
+    current_position = _current_position_text(broker, symbol)
     message = format_signal_message(signal, current_position=current_position)
     return SignalCheckResult(signal=signal, message=message, current_position=current_position)
 
 
 def check_sqqq_death_cross(
-    quote_context,
+    broker: Broker,
     symbol: str = "SQQQ.US",
     fast: int = 5,
     slow: int = 30,
     candle_count: int = 300,
     adjust_type: str = "forward",
-    trade_context=None,
     preview: bool = False,
 ) -> SignalCheckResult:
     checker = check_ema_preview_signal if preview else check_ema_signal
     result = checker(
-        quote_context=quote_context,
-        trade_context=trade_context,
+        broker=broker,
         symbol=symbol,
         fast=fast,
         slow=slow,
@@ -160,9 +152,9 @@ def _ema_position_text(signal: EmaCrossSignal) -> str:
     return "EMA 快线与慢线基本相等，临界状态"
 
 
-def _current_position_text(trade_context, symbol: str) -> str:
+def _current_position_text(broker: Broker, symbol: str) -> str:
     try:
-        positions = AccountService(trade_context).get_stock_positions(symbols=[symbol])
+        positions = broker.get_stock_positions(symbols=[symbol])
     except Exception as exc:
         return f"查询失败：{exc}"
     if not positions:

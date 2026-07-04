@@ -7,18 +7,8 @@ from decimal import Decimal, InvalidOperation
 from time import monotonic, sleep
 from typing import Any, Callable, Optional
 
-
-@dataclass(frozen=True)
-class QuoteSnapshot:
-    """单次行情快照：Longbridge 返回一组对象，这里只保留监控需要的字段。"""
-
-    symbol: str
-    last_done: Decimal
-    prev_close: Optional[Decimal]
-    open: Optional[Decimal]
-    high: Optional[Decimal]
-    low: Optional[Decimal]
-    timestamp: Optional[str]
+from .brokers import Broker
+from .brokers.base import QuoteSnapshot
 
 
 @dataclass(frozen=True)
@@ -117,18 +107,18 @@ class QuoteMonitor:
     """简单行情监控器。
 
     第一版采用轮询：每隔 interval_seconds 秒请求一次最新行情。
-    后续如果要更实时，可以把 fetch_quote 替换为 Longbridge 订阅行情。
+    后续如果要更实时，可以把 fetch_quote 替换为券商的订阅行情。
     """
 
     def __init__(
         self,
-        quote_context: Any,
+        broker: Broker,
         symbol: str,
         rules: list[AlertRule],
         interval_seconds: int = 10,
         window_seconds: int = 300,
     ) -> None:
-        self._quote_context = quote_context
+        self._broker = broker
         self._symbol = symbol
         self._rules = rules
         self._interval_seconds = interval_seconds
@@ -153,12 +143,9 @@ class QuoteMonitor:
                 sleep(self._interval_seconds)
 
     def fetch_quote(self) -> QuoteSnapshot:
-        """从 Longbridge 拉取一个标的的最新报价。"""
+        """从券商拉取一个标的的最新报价。"""
 
-        quotes = self._quote_context.quote([self._symbol])
-        if not quotes:
-            raise RuntimeError(f"No quote returned for {self._symbol}.")
-        return normalize_quote(quotes[0])
+        return self._broker.get_quote(self._symbol)
 
 
 def build_rules(
@@ -239,22 +226,6 @@ def build_rules(
     return rules
 
 
-def normalize_quote(quote: Any) -> QuoteSnapshot:
-    """把 Longbridge SDK 的行情对象转成我们自己的 QuoteSnapshot。"""
-
-    symbol = str(_getattr(quote, "symbol") or "")
-    last_done = _decimal(_getattr(quote, "last_done"), "last_done")
-    return QuoteSnapshot(
-        symbol=symbol,
-        last_done=last_done,
-        prev_close=_optional_decimal(_getattr(quote, "prev_close")),
-        open=_optional_decimal(_getattr(quote, "open")),
-        high=_optional_decimal(_getattr(quote, "high")),
-        low=_optional_decimal(_getattr(quote, "low")),
-        timestamp=_stringify(_getattr(quote, "timestamp")),
-    )
-
-
 def _pct_change_above(state: MonitorState, threshold: Decimal) -> Optional[tuple[str, Optional[Decimal]]]:
     value = state.pct_change()
     if value is not None and value > threshold:
@@ -299,26 +270,8 @@ def _format_alert(event: AlertEvent) -> str:
     )
 
 
-def _getattr(obj: Any, name: str, default: Any = None) -> Any:
-    if obj is None:
-        return default
-    return getattr(obj, name, default)
-
-
 def _decimal(value: Any, field_name: str) -> Decimal:
     try:
         return Decimal(str(value))
     except (InvalidOperation, TypeError, ValueError) as exc:
         raise ValueError(f"{field_name} must be a number, got {value!r}.") from exc
-
-
-def _optional_decimal(value: Any) -> Optional[Decimal]:
-    if value is None:
-        return None
-    return _decimal(value, "optional_decimal")
-
-
-def _stringify(value: Any) -> Optional[str]:
-    if value is None:
-        return None
-    return str(value)

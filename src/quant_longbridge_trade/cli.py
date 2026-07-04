@@ -5,8 +5,7 @@ import json
 import sys
 from typing import Any, Optional
 
-from .account import AccountService, AccountSnapshot
-from .config import create_quote_context, create_trade_context
+from .brokers import AccountSnapshot, SUPPORTED_BROKERS, create_broker, resolve_broker_name
 from .daemon import DaemonConfig, SignalDaemon
 from .ema_service import (
     check_ema_preview_signal,
@@ -44,6 +43,7 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
 
     account = subparsers.add_parser("account", help="Query account balances and stock positions.")
+    _add_broker_argument(account)
     account.add_argument("--currency", help="Optional currency filter, e.g. HKD, USD, CNH.")
     account.add_argument(
         "--symbols",
@@ -53,6 +53,7 @@ def _build_parser() -> argparse.ArgumentParser:
     account.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
 
     monitor = subparsers.add_parser("monitor", help="监控某个标的行情，触发规则时打印提醒。")
+    _add_broker_argument(monitor)
     monitor.add_argument(
         "--symbol",
         default="TQQQ.US",
@@ -124,8 +125,17 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _add_broker_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--broker",
+        choices=list(SUPPORTED_BROKERS),
+        help="使用哪家券商。默认读环境变量 BROKER，未设置则用 longbridge。",
+    )
+
+
 def _add_ema_signal_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--symbol", default="TQQQ.US", help="Longbridge 标的代码。默认：TQQQ.US。")
+    _add_broker_argument(parser)
+    parser.add_argument("--symbol", default="TQQQ.US", help="标的代码。默认：TQQQ.US。")
     parser.add_argument("--fast", type=int, default=5, help="EMA 快线周期。默认：5。")
     parser.add_argument("--slow", type=int, default=30, help="EMA 慢线周期。默认：30。")
     parser.add_argument("--candle-count", type=int, default=300, help="拉取最近多少根日线。默认：300。")
@@ -140,9 +150,8 @@ def _add_ema_signal_arguments(parser: argparse.ArgumentParser) -> None:
 
 def _handle_account(args: argparse.Namespace) -> int:
     try:
-        ctx = create_trade_context()
-        service = AccountService(ctx)
-        snapshot = service.get_account_snapshot(currency=args.currency, symbols=args.symbols)
+        broker = create_broker(args.broker)
+        snapshot = broker.get_account_snapshot(currency=args.currency, symbols=args.symbols)
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
@@ -173,9 +182,8 @@ def _handle_monitor(args: argparse.Namespace) -> int:
             )
             return 2
 
-        ctx = create_quote_context()
         monitor = QuoteMonitor(
-            quote_context=ctx,
+            broker=create_broker(args.broker),
             symbol=args.symbol,
             rules=rules,
             interval_seconds=args.interval_seconds,
@@ -194,10 +202,10 @@ def _handle_monitor(args: argparse.Namespace) -> int:
 
 def _handle_signal(args: argparse.Namespace) -> int:
     try:
+        broker = create_broker(args.broker)
         checker = check_ema_preview_signal if args.preview else check_ema_signal
         result = checker(
-            quote_context=create_quote_context(),
-            trade_context=create_trade_context(),
+            broker=broker,
             symbol=args.symbol,
             fast=args.fast,
             slow=args.slow,
@@ -209,8 +217,7 @@ def _handle_signal(args: argparse.Namespace) -> int:
         sqqq_result = None
         if args.watch_sqqq_death_cross:
             sqqq_result = check_sqqq_death_cross(
-                quote_context=create_quote_context(),
-                trade_context=create_trade_context(),
+                broker=broker,
                 symbol=args.sqqq_symbol,
                 fast=args.fast,
                 slow=args.slow,
@@ -267,6 +274,7 @@ def _handle_daemon(args: argparse.Namespace) -> int:
         timezone = args.timezone or args.market_timezone
         confirm_at = args.run_at or args.confirm_at
         config = DaemonConfig(
+            broker=resolve_broker_name(args.broker),
             symbol=args.symbol,
             sqqq_symbol=args.sqqq_symbol,
             fast=args.fast,
@@ -299,16 +307,16 @@ def _handle_daemon(args: argparse.Namespace) -> int:
 def _send_signal_error_notification(args: argparse.Namespace, exc: Exception) -> None:
     message = "\n".join(
         [
-            "Longbridge 策略检查失败",
+            "策略检查失败",
             "",
+            f"券商：{resolve_broker_name(args.broker)}",
             f"标的：{args.symbol}",
             f"策略：EMA{args.fast}/EMA{args.slow}",
             "",
             "可能原因：",
-            "- LONGBRIDGE_ACCESS_TOKEN 过期或无效",
-            "- LONGBRIDGE_APP_KEY / LONGBRIDGE_APP_SECRET / LONGBRIDGE_ACCESS_TOKEN 缺失",
+            "- 券商 API 凭证过期、无效或缺失",
             "- 行情权限不足",
-            "- 网络或 Longbridge OpenAPI 暂时不可用",
+            "- 网络或券商 OpenAPI 暂时不可用",
             "",
             f"错误：{exc}",
         ]
