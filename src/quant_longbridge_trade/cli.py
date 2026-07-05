@@ -16,6 +16,7 @@ from .ema_service import (
 from .notifier import FeishuNotifier
 from .monitor import QuoteMonitor, build_rules
 from .state import JsonStateStore
+from .strategies import SELL_SIGNALS
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -250,7 +251,7 @@ def _handle_signal(args: argparse.Namespace) -> int:
                     state.mark_sent(key)
                 print(f"Feishu notification sent: {key}")
         if sqqq_result is not None:
-            if sqqq_result.signal.signal in {"SELL", "SELL_PREVIEW"} and (args.notify or args.notify_no_signal):
+            if sqqq_result.signal.signal in SELL_SIGNALS and (args.notify or args.notify_no_signal):
                 key = f"{sqqq_result.signal.dedupe_key}:SQQQ_DEATH"
                 state = JsonStateStore(args.state_path)
                 if not args.no_dedupe and state.was_sent(key):

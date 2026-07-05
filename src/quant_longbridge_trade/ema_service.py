@@ -6,6 +6,7 @@ from typing import Optional
 
 from .brokers import Broker
 from .strategies import (
+    SELL_SIGNALS,
     EmaCrossSignal,
     ema_position_text,
     evaluate_ema_cross,
@@ -94,7 +95,7 @@ def check_sqqq_death_cross(
         candle_count=candle_count,
         adjust_type=adjust_type,
     )
-    if result.signal.signal not in {"SELL", "SELL_PREVIEW"}:
+    if result.signal.signal not in SELL_SIGNALS:
         return result
 
     status = ema_position_text(result.signal)

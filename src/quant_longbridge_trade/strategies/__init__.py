@@ -6,6 +6,15 @@
 3. 在这里 re-export，服务层统一从 quant_longbridge_trade.strategies import
 """
 from .ema_cross import (
+    ACTION_SIGNALS,
+    BUY_SIGNALS,
+    SELL_SIGNALS,
+    SIGNAL_BUY,
+    SIGNAL_BUY_PREVIEW,
+    SIGNAL_NONE,
+    SIGNAL_NONE_PREVIEW,
+    SIGNAL_SELL,
+    SIGNAL_SELL_PREVIEW,
     EmaCrossSignal,
     ema_position_text,
     evaluate_ema_cross,
@@ -14,6 +23,15 @@ from .ema_cross import (
 from .indicators import ema
 
 __all__ = [
+    "ACTION_SIGNALS",
+    "BUY_SIGNALS",
+    "SELL_SIGNALS",
+    "SIGNAL_BUY",
+    "SIGNAL_BUY_PREVIEW",
+    "SIGNAL_NONE",
+    "SIGNAL_NONE_PREVIEW",
+    "SIGNAL_SELL",
+    "SIGNAL_SELL_PREVIEW",
     "EmaCrossSignal",
     "ema",
     "ema_position_text",

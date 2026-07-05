@@ -12,6 +12,18 @@ from typing import Optional
 from ..brokers.base import DailyCandle
 from .indicators import ema
 
+# 信号词统一在这里定义；改文案只改这里，其他代码都引用常量
+SIGNAL_BUY = "快买买"
+SIGNAL_BUY_PREVIEW = "买买买买"
+SIGNAL_SELL = "卖出吧"
+SIGNAL_SELL_PREVIEW = "卖卖卖卖"
+SIGNAL_NONE = "不用管！"
+SIGNAL_NONE_PREVIEW = "不用管"
+
+ACTION_SIGNALS = {SIGNAL_BUY, SIGNAL_BUY_PREVIEW, SIGNAL_SELL, SIGNAL_SELL_PREVIEW}
+SELL_SIGNALS = {SIGNAL_SELL, SIGNAL_SELL_PREVIEW}
+BUY_SIGNALS = {SIGNAL_BUY, SIGNAL_BUY_PREVIEW}
+
 
 @dataclass(frozen=True)
 class EmaCrossSignal:
@@ -23,12 +35,15 @@ class EmaCrossSignal:
     slow_ema: Decimal
     previous_fast_ema: Decimal
     previous_slow_ema: Decimal
+    fast_slow_diff: Decimal
+    previous_fast_slow_diff: Decimal
+    higher_line: str
     reason: str
     mode: str = "CONFIRMED"
 
     @property
     def has_signal(self) -> bool:
-        return self.signal in {"BUY", "SELL", "BUY_PREVIEW", "SELL_PREVIEW"}
+        return self.signal in ACTION_SIGNALS
 
     @property
     def dedupe_key(self) -> str:
@@ -59,14 +74,23 @@ def evaluate_ema_cross(
     latest_slow = slow_values[-1]
     latest = candles[-1]
 
+    prev_diff = prev_fast - prev_slow
+    latest_diff = latest_fast - latest_slow
+    if latest_diff > 0:
+        higher_line = f"EMA{fast}"
+    elif latest_diff < 0:
+        higher_line = f"EMA{slow}"
+    else:
+        higher_line = "相等"
+
     if prev_fast <= prev_slow and latest_fast > latest_slow:
-        signal = "买买买买" if mode == "PREVIEW" else "快买买"
+        signal = SIGNAL_BUY_PREVIEW if mode == "PREVIEW" else SIGNAL_BUY
         reason = f"EMA{fast} 上穿 EMA{slow}"
     elif prev_fast >= prev_slow and latest_fast < latest_slow:
-        signal = "卖卖卖卖" if mode == "PREVIEW" else "卖出吧"
+        signal = SIGNAL_SELL_PREVIEW if mode == "PREVIEW" else SIGNAL_SELL
         reason = f"EMA{fast} 下穿 EMA{slow}"
     else:
-        signal = "不用管不用管" if mode == "不用管！！" else "不用管！"
+        signal = SIGNAL_NONE_PREVIEW if mode == "PREVIEW" else SIGNAL_NONE
         reason = f"EMA{fast}/EMA{slow} 未发生穿越"
 
     return EmaCrossSignal(
@@ -78,6 +102,9 @@ def evaluate_ema_cross(
         slow_ema=latest_slow,
         previous_fast_ema=prev_fast,
         previous_slow_ema=prev_slow,
+        fast_slow_diff=latest_diff,
+        previous_fast_slow_diff=prev_diff,
+        higher_line=higher_line,
         reason=reason,
         mode=mode,
     )
@@ -100,6 +127,9 @@ def format_signal_message(
         f"EMA 慢线：{_fmt_decimal(signal.slow_ema)}",
         f"昨日快线：{_fmt_decimal(signal.previous_fast_ema)}",
         f"昨日慢线：{_fmt_decimal(signal.previous_slow_ema)}",
+        f"今日快慢差：{_fmt_signed(signal.fast_slow_diff)}",
+        f"昨日快慢差：{_fmt_signed(signal.previous_fast_slow_diff)}",
+        f"当前在上方：{signal.higher_line}",
     ]
     if current_position is not None:
         lines.extend(["", f"当前持仓：{current_position}"])
@@ -116,3 +146,7 @@ def ema_position_text(signal: EmaCrossSignal) -> str:
 
 def _fmt_decimal(value: Decimal) -> str:
     return f"{value:.4f}"
+
+
+def _fmt_signed(value: Decimal) -> str:
+    return f"{value:+.4f}"

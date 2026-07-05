@@ -16,6 +16,7 @@ from .ema_service import (
 )
 from .notifier import FeishuNotifier
 from .state import JsonStateStore
+from .strategies import SELL_SIGNALS
 
 
 @dataclass(frozen=True)
@@ -120,7 +121,7 @@ class SignalDaemon:
             self._send_sqqq_death_cross(sqqq_result, notifier)
 
     def _send_sqqq_death_cross(self, result, notifier: FeishuNotifier) -> None:
-        if result.signal.signal not in {"SELL", "SELL_PREVIEW"}:
+        if result.signal.signal not in SELL_SIGNALS:
             return
         key = f"{result.signal.dedupe_key}:SQQQ_DEATH"
         if self._state.was_sent(key):

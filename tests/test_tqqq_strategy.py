@@ -38,7 +38,14 @@ from quant_longbridge_trade.ema_service import (  # noqa: E402
     check_ema_signal,
     check_sqqq_death_cross,
 )
-from quant_longbridge_trade.strategies import evaluate_ema_cross  # noqa: E402
+from quant_longbridge_trade.strategies import (  # noqa: E402
+    SIGNAL_BUY,
+    SIGNAL_BUY_PREVIEW,
+    SIGNAL_NONE,
+    SIGNAL_NONE_PREVIEW,
+    SIGNAL_SELL,
+    evaluate_ema_cross,
+)
 
 BASE_DATE = datetime(2026, 1, 1)
 
@@ -112,21 +119,36 @@ def _quote(price, timestamp: str, symbol: str = "TQQQ.US") -> QuoteSnapshot:
 
 def test_golden_cross_gives_buy():
     signal = evaluate_ema_cross(make_candles(GOLDEN_CROSS_CLOSES), "TQQQ.US")
-    assert signal.signal == "BUY", signal.signal
+    assert signal.signal == SIGNAL_BUY, signal.signal
     assert signal.fast_ema > signal.slow_ema
     assert signal.previous_fast_ema <= signal.previous_slow_ema
-    assert signal.dedupe_key == f"TQQQ.US:{signal.trade_date}:EMA:CONFIRMED:BUY"
+    assert signal.dedupe_key == f"TQQQ.US:{signal.trade_date}:EMA:CONFIRMED:{SIGNAL_BUY}"
 
 
 def test_death_cross_gives_sell():
     signal = evaluate_ema_cross(make_candles(DEATH_CROSS_CLOSES), "TQQQ.US")
-    assert signal.signal == "SELL", signal.signal
+    assert signal.signal == SIGNAL_SELL, signal.signal
     assert signal.fast_ema < signal.slow_ema
 
 
 def test_day_before_cross_is_no_signal():
     signal = evaluate_ema_cross(make_candles(GOLDEN_CROSS_CLOSES[:-1]), "TQQQ.US")
-    assert signal.signal == "NO_SIGNAL", signal.signal
+    assert signal.signal == SIGNAL_NONE, signal.signal
+
+
+def test_diff_indicators():
+    # 金叉当天：今日差值为正、昨日差值 <= 0，快线在上方
+    signal = evaluate_ema_cross(make_candles(GOLDEN_CROSS_CLOSES), "TQQQ.US")
+    assert signal.fast_slow_diff == signal.fast_ema - signal.slow_ema
+    assert signal.previous_fast_slow_diff == signal.previous_fast_ema - signal.previous_slow_ema
+    assert signal.fast_slow_diff > 0
+    assert signal.previous_fast_slow_diff <= 0
+    assert signal.higher_line == "EMA5", signal.higher_line
+
+    # 死叉当天：今日差值为负，慢线在上方
+    signal = evaluate_ema_cross(make_candles(DEATH_CROSS_CLOSES), "TQQQ.US")
+    assert signal.fast_slow_diff < 0
+    assert signal.higher_line == "EMA30", signal.higher_line
 
 
 def test_invalid_params_raise():
@@ -149,10 +171,13 @@ def test_invalid_params_raise():
 def test_confirmed_signal_through_broker():
     broker = FakeBroker(make_candles(GOLDEN_CROSS_CLOSES))
     result = check_ema_signal(broker, symbol="TQQQ.US")
-    assert result.signal.signal == "BUY"
+    assert result.signal.signal == SIGNAL_BUY
     assert "EMA5 上穿 EMA30" in result.message
     assert "当前持仓：100 股，可用 100" in result.message
     assert "TQQQ EMA 策略确认" in result.message
+    assert "今日快慢差：+" in result.message
+    assert "昨日快慢差：" in result.message
+    assert "当前在上方：EMA5" in result.message
 
 
 def test_preview_replaces_today_close():
@@ -162,8 +187,8 @@ def test_preview_replaces_today_close():
     broker = FakeBroker(candles, quote=_quote(Decimal("76") * Decimal("1.15"), today))
     result = check_ema_preview_signal(broker, symbol="TQQQ.US")
     assert result.signal.mode == "PREVIEW"
-    assert result.signal.signal == "BUY_PREVIEW", result.signal.signal
-    assert "这是收盘前预警" in result.message
+    assert result.signal.signal == SIGNAL_BUY_PREVIEW, result.signal.signal
+    assert "TQQQ EMA 策略预警" in result.message
 
 
 def test_preview_appends_new_day_candle():
@@ -172,7 +197,7 @@ def test_preview_appends_new_day_candle():
     next_day = (candles[-1].timestamp + timedelta(days=1)).date().isoformat()
     broker = FakeBroker(candles, quote=_quote(Decimal("76") * Decimal("1.15"), next_day))
     result = check_ema_preview_signal(broker, symbol="TQQQ.US")
-    assert result.signal.signal == "BUY_PREVIEW", result.signal.signal
+    assert result.signal.signal == SIGNAL_BUY_PREVIEW, result.signal.signal
     assert result.signal.trade_date == next_day
 
 
@@ -181,7 +206,7 @@ def test_preview_no_cross_stays_quiet():
     today = candles[-1].timestamp.date().isoformat()
     broker = FakeBroker(candles, quote=_quote("76", today))  # 价格没变
     result = check_ema_preview_signal(broker, symbol="TQQQ.US")
-    assert result.signal.signal == "NO_PREVIEW_SIGNAL", result.signal.signal
+    assert result.signal.signal == SIGNAL_NONE_PREVIEW, result.signal.signal
     assert not result.signal.has_signal
 
 
@@ -189,7 +214,7 @@ def test_sqqq_death_cross_message():
     closes = DEATH_CROSS_CLOSES
     broker = FakeBroker(make_candles(closes, symbol="SQQQ.US"))
     result = check_sqqq_death_cross(broker, symbol="SQQQ.US")
-    assert result.signal.signal == "SELL"
+    assert result.signal.signal == SIGNAL_SELL
     assert "SQQQ EMA 死叉确认" in result.message
     assert "考虑先卖出空仓" in result.message
 
@@ -201,7 +226,7 @@ def test_position_query_failure_is_tolerated():
 
     broker = BrokenPositionBroker(make_candles(GOLDEN_CROSS_CLOSES))
     result = check_ema_signal(broker, symbol="TQQQ.US")
-    assert result.signal.signal == "BUY"  # 持仓查询失败不影响信号
+    assert result.signal.signal == SIGNAL_BUY  # 持仓查询失败不影响信号
     assert "查询失败" in result.current_position
 
 
