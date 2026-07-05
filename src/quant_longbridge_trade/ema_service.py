@@ -5,7 +5,12 @@ from datetime import datetime
 from typing import Optional
 
 from .brokers import Broker
-from .strategies import EmaCrossSignal, evaluate_ema_cross, format_signal_message
+from .strategies import (
+    EmaCrossSignal,
+    ema_position_text,
+    evaluate_ema_cross,
+    format_signal_message,
+)
 
 
 @dataclass(frozen=True)
@@ -92,7 +97,7 @@ def check_sqqq_death_cross(
     if result.signal.signal not in {"SELL", "SELL_PREVIEW"}:
         return result
 
-    status = _ema_position_text(result.signal)
+    status = ema_position_text(result.signal)
     prefix = "SQQQ EMA 死叉预警" if preview else "SQQQ EMA 死叉确认"
     message = "\n".join(
         [
@@ -137,19 +142,11 @@ def format_secondary_signal_status(result: SignalCheckResult, title: str) -> str
             "",
             f"当前持仓：{result.current_position}" if result.current_position is not None else "",
             "",
-            f"当前状态：{_ema_position_text(signal)}",
+            f"当前状态：{ema_position_text(signal)}",
             "",
             "策略含义：SQQQ 死叉时，考虑从 SQQQ 退出到空仓；等待 TQQQ 金叉再切回 TQQQ。",
         ]
     ).strip()
-
-
-def _ema_position_text(signal: EmaCrossSignal) -> str:
-    if signal.fast_ema > signal.slow_ema:
-        return "EMA 快线在慢线上方，偏多状态"
-    if signal.fast_ema < signal.slow_ema:
-        return "EMA 快线在慢线下方，偏空状态"
-    return "EMA 快线与慢线基本相等，临界状态"
 
 
 def _current_position_text(broker: Broker, symbol: str) -> str:

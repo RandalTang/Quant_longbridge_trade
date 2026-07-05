@@ -1,10 +1,16 @@
+"""EMA 快慢线金叉/死叉策略（默认 EMA5/EMA30，用于 TQQQ/SQQQ 轮动）。
+
+纯函数：输入日线 K 线列表，输出带 dedupe_key 的信号 dataclass，
+不碰网络、SDK 和券商。新策略照这个模式写。
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Optional
 
-from .brokers.base import DailyCandle
+from ..brokers.base import DailyCandle
+from .indicators import ema
 
 
 @dataclass(frozen=True)
@@ -44,8 +50,8 @@ def evaluate_ema_cross(
         raise ValueError(f"Need at least {slow + 2} candles, got {len(candles)}")
 
     closes = [candle.close for candle in candles]
-    fast_values = _ema(closes, fast)
-    slow_values = _ema(closes, slow)
+    fast_values = ema(closes, fast)
+    slow_values = ema(closes, slow)
 
     prev_fast = fast_values[-2]
     prev_slow = slow_values[-2]
@@ -99,7 +105,7 @@ def format_signal_message(
         lines.extend(["", f"当前持仓：{current_position}"])
     if signal.mode == "PREVIEW":
         lines.extend(["", "说明：这是收盘前预警，不是确认信号；最后几分钟可能变化。"])
-    lines.extend(["", f"当前状态：{_ema_position_text(signal)}"])
+    lines.extend(["", f"当前状态：{ema_position_text(signal)}"])
     if signal.signal in {"BUY", "BUY_PREVIEW"}:
         lines.extend(["", "建议动作：关注收盘确认，检查账户后考虑买入。"])
     elif signal.signal in {"SELL", "SELL_PREVIEW"}:
@@ -109,23 +115,13 @@ def format_signal_message(
     return "\n".join(lines)
 
 
-def _ema(values: list[Decimal], span: int) -> list[Decimal]:
-    alpha = Decimal("2") / Decimal(span + 1)
-    result: list[Decimal] = []
-    current: Optional[Decimal] = None
-    for value in values:
-        current = value if current is None else value * alpha + current * (Decimal("1") - alpha)
-        result.append(current)
-    return result
-
-
-def _fmt_decimal(value: Decimal) -> str:
-    return f"{value:.4f}"
-
-
-def _ema_position_text(signal: EmaCrossSignal) -> str:
+def ema_position_text(signal: EmaCrossSignal) -> str:
     if signal.fast_ema > signal.slow_ema:
         return "EMA 快线在慢线上方，偏多状态"
     if signal.fast_ema < signal.slow_ema:
         return "EMA 快线在慢线下方，偏空状态"
     return "EMA 快线与慢线基本相等，临界状态"
+
+
+def _fmt_decimal(value: Decimal) -> str:
+    return f"{value:.4f}"
